@@ -12,15 +12,15 @@ from umqtt.simple import MQTTClient
 # CONFIGURACION
 # -----------------------------
 
-SSID = "Nombre de la red"
-PASSWORD = "Contraseña"
+SSID = "RELLENAR"
+PASSWORD = "RELLENAR"
 
-TOKEN = "TokenUbidots"
+TOKEN = "RELLENAR"
 
 SERVIDOR = "industrial.api.ubidots.com"
 DISPOSITIVO = "control_acceso_pico"
 
-AUTORIZADOS = ["4BEB0307", "974B2606"]
+AUTORIZADOS = ["RELLENAR", "RELLENAR"]
 
 # -----------------------------
 # COMPONENTES
@@ -31,6 +31,13 @@ rojo = Pin(13, Pin.OUT)
 mosfet = Pin(10, Pin.OUT, value=0)
 
 reed = Pin(14, Pin.IN, Pin.PULL_UP)
+
+reed_flag = asyncio.ThreadSafeFlag()
+
+def reed_irq(pin):
+    reed_flag.set()          # el handler solo avisa, no hace nada más
+
+reed.irq(trigger=Pin.IRQ_FALLING | Pin.IRQ_RISING, handler=reed_irq)
 
 Pin(22, Pin.OUT).value(1)
 
@@ -97,8 +104,10 @@ async def tarea_mqtt():
                 datos = eventos.pop(0)
 
                 mensaje = ujson.dumps(datos).encode()
-
+                
+                t_pub = time.ticks_ms()
                 cliente.publish(topic, mensaje)
+                print("T_PUBLICAR_ms:", time.ticks_diff(time.ticks_ms(), t_pub))
 
                 print("ENVIADO A UBIDOTS:", datos)
 
@@ -126,6 +135,8 @@ async def controlar_puerta():
 
     while True:
 
+        await reed_flag.wait()          # duerme hasta que llegue la interrupción
+        await asyncio.sleep_ms(20)      # antirrebote
         estado_actual = reed.value()
 
         if estado_actual != estado_anterior:
@@ -139,8 +150,6 @@ async def controlar_puerta():
 
             estado_anterior = estado_actual
 
-        await asyncio.sleep_ms(50)
-
 
 # -----------------------------
 # LECTOR RFID
@@ -149,8 +158,11 @@ async def controlar_puerta():
 async def controlar_rfid():
 
     while True:
-
+        
+        t_ini = time.ticks_ms()
         uid = await rc522.leer_uid_async()
+        t_lect = time.ticks_diff(time.ticks_ms(), t_ini)
+        t_uid = time.ticks_us()
 
         if uid:
 
@@ -165,6 +177,8 @@ async def controlar_rfid():
                 verde.on()
                 rojo.off()
                 mosfet.on()
+                print("T_LECTURA_ms:", t_lect,
+                      "| T_RESPUESTA_us:", time.ticks_diff(time.ticks_us(), t_uid))
 
                 await asyncio.sleep(3)
 
